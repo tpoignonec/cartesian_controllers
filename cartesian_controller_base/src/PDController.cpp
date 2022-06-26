@@ -39,6 +39,7 @@
 //-----------------------------------------------------------------------------
 
 #include <cartesian_controller_base/PDController.h>
+#include <cmath> 
 
 namespace cartesian_controller_base
 {
@@ -72,20 +73,43 @@ void PDController::init(const std::string& params, std::shared_ptr<rclcpp::Node>
 
   auto_declare(m_params + ".p");
   auto_declare(m_params + ".d");
+
+  m_handle->declare_parameter<double> (m_params + ".error_filter.cutoff_freq", -1);
+  m_handle->declare_parameter<bool>( m_params + ".error_filter.use_real_update_rate", false);
 }
 
 
 double PDController::operator()(const double& error, const rclcpp::Duration& period)
 {
-  if (period == rclcpp::Duration(0.0))
+  if (period == rclcpp::Duration::from_nanoseconds(0.0))
   {
     return 0.0;
   }
-
+ 
   // Get latest gains
   m_handle->get_parameter(m_params + ".p", m_p);
   m_handle->get_parameter(m_params + ".d", m_d);
-  double result = m_p * error + m_d * (error - m_last_p_error) / period.seconds();
+
+  // Get filter configuration
+  //TODO cutoff_freq and use_real_update_rate as class members
+  double cutoff_freq;
+  m_handle->get_parameter(m_params + ".error_filter.cutoff_freq", cutoff_freq);
+  bool use_real_update_rate;
+  m_handle->get_parameter(m_params + ".error_filter.use_real_update_rate", use_real_update_rate);
+
+  // Filter error
+  double filtered_error = error;
+  if (cutoff_freq > 0) // Filter disactivated for cutoff_freq <= 0
+  {
+    double dt = use_real_update_rate == true ? 
+      1.0/m_handle->get_parameter("update_rate").as_double()
+      : period.seconds();
+    double alpha = 1 - exp(-dt*2*M_PI*cutoff_freq);
+    filtered_error = alpha * error + (1- alpha) * m_last_p_error;
+  }
+
+  // Copute PD output
+  double result = m_p * filtered_error + m_d * (filtered_error - m_last_p_error) / period.seconds();
 
   m_last_p_error = error;
   return result;
