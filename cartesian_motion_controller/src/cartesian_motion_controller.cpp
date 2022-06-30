@@ -205,7 +205,7 @@ controller_interface::return_type CartesianMotionController::update()
 
     // Compute the motion error = target - current.
     ctrl::Vector6D error = computeMotionError();
-    double alpha_filter_twist = 0.04; // cutoff freq ~ 100 Hz
+    double alpha_filter_twist = 1 - exp(-0.001 * 2*M_PI*50); // cutoff freq ~ 50 Hz
     m_current_twist = alpha_filter_twist*m_current_twist + (1-alpha_filter_twist)* Base::m_ik_solver->getEndEffectorVel();
     ctrl::Vector6D error_derivative = m_target_twist - m_current_twist;
     // Compute error derivative (target_twist - current_twist)
@@ -312,7 +312,7 @@ void CartesianMotionController::targetTwistCallback(std::shared_ptr<geometry_msg
   raw_target_twist[4] = target_twist_msg->twist.angular.y;
   raw_target_twist[5] = target_twist_msg->twist.angular.z;
 
-  double alpha_target_twist = 0.04;
+  double alpha_target_twist = 1 - exp(-0.001 * 2*M_PI*50); // cutoff freq ~ 200 Hz
   m_target_twist = alpha_target_twist * raw_target_twist + (1-alpha_target_twist) * m_target_twist;
   return;
 }
