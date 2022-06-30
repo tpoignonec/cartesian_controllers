@@ -51,7 +51,7 @@ namespace cartesian_motion_controller
 {
 
 CartesianMotionController::CartesianMotionController()
-: Base::CartesianControllerBase()
+: Base::CartesianControllerBase(), m_realtime_target_frame_ptr(nullptr)
 {
 }
 
@@ -89,7 +89,21 @@ rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn Cartes
   }
 
   m_target_frame_subscr = get_node()->create_subscription<geometry_msgs::msg::PoseStamped>(
-      "target_frame", 3, std::bind(&CartesianMotionController::targetFrameCallback, this, std::placeholders::_1));
+      "target_frame", 
+        rclcpp::SystemDefaultsQoS(), 
+        [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { m_realtime_target_frame_ptr.writeFromNonRT(msg); });
+
+  
+  m_target_twist_subscr = get_node()->create_subscription<geometry_msgs::msg::TwistStamped>(
+      "target_twist", 
+        rclcpp::SystemDefaultsQoS(), 
+        [this](const geometry_msgs::msg::TwistStamped::SharedPtr msg) { m_realtime_target_twist_ptr.writeFromNonRT(msg); });
+
+  // DEBUG Publishers
+  m_current_pose_publisher =
+    get_node()->create_publisher<geometry_msgs::msg::PoseStamped>("follower_controller/current_frame", 10);
+  m_target_pose_publisher =
+    get_node()->create_publisher<geometry_msgs::msg::PoseStamped>("follower_controller/target_frame", 10);
 
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
 }
@@ -101,9 +115,11 @@ rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn Cartes
 
   // Reset simulation with real joint state
   m_current_frame = Base::m_ik_solver->getEndEffectorPose();
+  m_current_twist.setZero();
 
   // Start where we are
   m_target_frame = m_current_frame;
+  m_target_twist.setZero();
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
 }
 
@@ -124,8 +140,58 @@ controller_interface::return_type CartesianMotionController::update(const rclcpp
 controller_interface::return_type CartesianMotionController::update()
 #endif
 {
+  // Read target pose
+  auto target_pose_msg = m_realtime_target_frame_ptr.readFromRT();
+  if (!target_pose_msg || !(*target_pose_msg)) // Else, the buffer is empty
+  {
+    auto& clock = *node_->get_clock();
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), clock, 3000, "No target pose received!");  
+  }
+  else
+  {
+     targetFrameCallback(*target_pose_msg);
+  }
+  // Read target twist
+  auto target_twist_msg = m_realtime_target_twist_ptr.readFromRT();
+  if (!target_twist_msg || !(*target_twist_msg)) // Else, the buffer is empty
+  {
+    auto& clock = *node_->get_clock();
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), clock, 3000, "No target twist received!");  
+  }
+  else
+  {
+     targetTwistCallback(*target_twist_msg);
+  }
   // Synchronize the internal model and the real robot
   Base::m_ik_solver->synchronizeJointPositions(Base::m_joint_state_pos_handles);
+
+  //--------------------------------------------------------
+  // DEBUG ONLY!
+  geometry_msgs::msg::PoseStamped current_pose;
+  auto current_time = get_node()->now();
+  current_pose.header.stamp    = current_time;
+  current_pose.header.frame_id = m_robot_base_link;
+  current_pose.pose.position.x = m_current_frame.p.x();
+  current_pose.pose.position.y = m_current_frame.p.y();
+  current_pose.pose.position.z = m_current_frame.p.z();
+  m_current_frame.M.GetQuaternion(current_pose.pose.orientation.x,
+                      current_pose.pose.orientation.y,
+                      current_pose.pose.orientation.z,
+                      current_pose.pose.orientation.w);
+  m_current_pose_publisher->publish(current_pose);
+
+  geometry_msgs::msg::PoseStamped target_pose;
+  target_pose.header.stamp    = current_time;
+  target_pose.header.frame_id = m_robot_base_link;
+  target_pose.pose.position.x = m_target_frame.p.x();
+  target_pose.pose.position.y = m_target_frame.p.y();
+  target_pose.pose.position.z = m_target_frame.p.z();
+  m_target_frame.M.GetQuaternion(target_pose.pose.orientation.x,
+                      target_pose.pose.orientation.y,
+                      target_pose.pose.orientation.z,
+                      target_pose.pose.orientation.w);
+  m_target_pose_publisher->publish(target_pose);
+  //--------------------------------------------------------
 
   // Forward Dynamics turns the search for the according joint motion into a
   // control process. So, we control the internal model until we meet the
@@ -139,13 +205,19 @@ controller_interface::return_type CartesianMotionController::update()
 
     // Compute the motion error = target - current.
     ctrl::Vector6D error = computeMotionError();
+    double alpha_filter_twist = 0.04; // cutoff freq ~ 100 Hz
+    m_current_twist = alpha_filter_twist*m_current_twist + (1-alpha_filter_twist)* Base::m_ik_solver->getEndEffectorVel();
+    ctrl::Vector6D error_derivative = m_target_twist - m_current_twist;
+    // Compute error derivative (target_twist - current_twist)
 
     // Turn Cartesian error into joint motion
-    Base::computeJointControlCmds(error,internal_period);
+    Base::computeJointControlCmds(error, error_derivative, internal_period);
   }
 
   // Write final commands to the hardware interface
   Base::writeJointControlCmds();
+
+
 
   return controller_interface::return_type::OK;
 }
@@ -193,29 +265,56 @@ computeMotionError()
   return error;
 }
 
-void CartesianMotionController::targetFrameCallback(const geometry_msgs::msg::PoseStamped::SharedPtr target)
-{
-  if (target->header.frame_id != Base::m_robot_base_link)
+void CartesianMotionController::targetFrameCallback(std::shared_ptr<geometry_msgs::msg::PoseStamped> target_msg)
+{ 
+  if (target_msg->header.frame_id != Base::m_robot_base_link)
   {
     auto& clock = *node_->get_clock();
     RCLCPP_WARN_THROTTLE(node_->get_logger(),
         clock, 3000,
         "Got target pose in wrong reference frame. Expected: %s but got %s",
         Base::m_robot_base_link.c_str(),
-        target->header.frame_id.c_str());
+        target_msg->header.frame_id.c_str());
     return;
   }
 
   m_target_frame = KDL::Frame(
       KDL::Rotation::Quaternion(
-        target->pose.orientation.x,
-        target->pose.orientation.y,
-        target->pose.orientation.z,
-        target->pose.orientation.w),
+        target_msg->pose.orientation.x,
+        target_msg->pose.orientation.y,
+        target_msg->pose.orientation.z,
+        target_msg->pose.orientation.w),
       KDL::Vector(
-        target->pose.position.x,
-        target->pose.position.y,
-        target->pose.position.z));
+        target_msg->pose.position.x,
+        target_msg->pose.position.y,
+        target_msg->pose.position.z));
+
+  return;
+}
+
+void CartesianMotionController::targetTwistCallback(std::shared_ptr<geometry_msgs::msg::TwistStamped> target_twist_msg)
+{ 
+  if (target_twist_msg->header.frame_id != Base::m_robot_base_link)
+  {
+    m_target_twist.setZero(); // Zero velocity
+    auto& clock = *node_->get_clock();
+    RCLCPP_WARN_THROTTLE(node_->get_logger(),
+        clock, 3000,
+        "Got target twist in wrong reference frame. Expected: %s but got %s",
+        Base::m_robot_base_link.c_str(),
+        target_twist_msg->header.frame_id.c_str());
+    return;
+  }
+  ctrl::Vector6D raw_target_twist;
+  raw_target_twist[1] = target_twist_msg->twist.linear.y;
+  raw_target_twist[2] = target_twist_msg->twist.linear.z;
+  raw_target_twist[3] = target_twist_msg->twist.angular.x;
+  raw_target_twist[4] = target_twist_msg->twist.angular.y;
+  raw_target_twist[5] = target_twist_msg->twist.angular.z;
+
+  double alpha_target_twist = 0.04;
+  m_target_twist = alpha_target_twist * raw_target_twist + (1-alpha_target_twist) * m_target_twist;
+  return;
 }
 
 } // namespace
