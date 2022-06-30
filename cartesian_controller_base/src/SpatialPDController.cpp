@@ -50,6 +50,17 @@ SpatialPDController::SpatialPDController()
 {
 }
 
+ctrl::Vector6D SpatialPDController::operator()(const ctrl::Vector6D& error, const ctrl::Vector6D& error_derivative, const rclcpp::Duration& period)
+{
+  // Perform pd control separately on each Cartesian dimension
+  for (int i = 0; i < 6; ++i) // 3 transition, 3 rotation
+  {
+    m_cmd(i) = m_pd_controllers[i](error[i], error_derivative[i], period);
+  }
+  return m_cmd;
+}
+
+
 ctrl::Vector6D SpatialPDController::operator()(const ctrl::Vector6D& error, const rclcpp::Duration& period)
 {
   // Perform pd control separately on each Cartesian dimension
