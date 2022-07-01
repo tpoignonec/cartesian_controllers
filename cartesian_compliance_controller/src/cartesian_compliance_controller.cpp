@@ -171,16 +171,17 @@ ctrl::Vector6D CartesianComplianceController::computeComplianceError()
   tmp[3] = get_node()->get_parameter("stiffness.rot_x").as_double();
   tmp[4] = get_node()->get_parameter("stiffness.rot_y").as_double();
   tmp[5] = get_node()->get_parameter("stiffness.rot_z").as_double();
-
   m_stiffness = tmp.asDiagonal();
+  
+  Eigen::Matrix<double, 6, 6> compliant_directions = Eigen::Matrix<double, 6, 6>::Zero();
+  compliant_directions(2,2) = 1; // only along Z
 
   ctrl::Vector6D net_force =
 
     // Spring force in base orientation
     Base::displayInBaseLink(m_stiffness,m_compliance_ref_link) * MotionBase::computeMotionError()
-
     // Sensor and target force in base orientation
-    + ForceBase::computeForceError();
+      + compliant_directions * ForceBase::computeForceError();
 
   return net_force;
 }
