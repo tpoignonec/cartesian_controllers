@@ -140,58 +140,9 @@ controller_interface::return_type CartesianMotionController::update(const rclcpp
 controller_interface::return_type CartesianMotionController::update()
 #endif
 {
-  // Read target pose
-  auto target_pose_msg = m_realtime_target_frame_ptr.readFromRT();
-  if (!target_pose_msg || !(*target_pose_msg)) // Else, the buffer is empty
-  {
-    auto& clock = *node_->get_clock();
-    RCLCPP_WARN_THROTTLE(node_->get_logger(), clock, 3000, "No target pose received!");  
-  }
-  else
-  {
-     targetFrameCallback(*target_pose_msg);
-  }
-  // Read target twist
-  auto target_twist_msg = m_realtime_target_twist_ptr.readFromRT();
-  if (!target_twist_msg || !(*target_twist_msg)) // Else, the buffer is empty
-  {
-    auto& clock = *node_->get_clock();
-    RCLCPP_WARN_THROTTLE(node_->get_logger(), clock, 3000, "No target twist received!");  
-  }
-  else
-  {
-     targetTwistCallback(*target_twist_msg);
-  }
   // Synchronize the internal model and the real robot
   Base::m_ik_solver->synchronizeJointPositions(Base::m_joint_state_pos_handles);
 
-  //--------------------------------------------------------
-  // DEBUG ONLY!
-  geometry_msgs::msg::PoseStamped current_pose;
-  auto current_time = get_node()->now();
-  current_pose.header.stamp    = current_time;
-  current_pose.header.frame_id = m_robot_base_link;
-  current_pose.pose.position.x = m_current_frame.p.x();
-  current_pose.pose.position.y = m_current_frame.p.y();
-  current_pose.pose.position.z = m_current_frame.p.z();
-  m_current_frame.M.GetQuaternion(current_pose.pose.orientation.x,
-                      current_pose.pose.orientation.y,
-                      current_pose.pose.orientation.z,
-                      current_pose.pose.orientation.w);
-  m_current_pose_publisher->publish(current_pose);
-
-  geometry_msgs::msg::PoseStamped target_pose;
-  target_pose.header.stamp    = current_time;
-  target_pose.header.frame_id = m_robot_base_link;
-  target_pose.pose.position.x = m_target_frame.p.x();
-  target_pose.pose.position.y = m_target_frame.p.y();
-  target_pose.pose.position.z = m_target_frame.p.z();
-  m_target_frame.M.GetQuaternion(target_pose.pose.orientation.x,
-                      target_pose.pose.orientation.y,
-                      target_pose.pose.orientation.z,
-                      target_pose.pose.orientation.w);
-  m_target_pose_publisher->publish(target_pose);
-  //--------------------------------------------------------
 
   // Forward Dynamics turns the search for the according joint motion into a
   // control process. So, we control the internal model until we meet the
@@ -204,11 +155,8 @@ controller_interface::return_type CartesianMotionController::update()
     auto internal_period = rclcpp::Duration::from_seconds(0.02);
 
     // Compute the motion error = target - current.
-    ctrl::Vector6D error = computeMotionError();
-    double alpha_filter_twist = 1 - exp(-0.001 * 2*M_PI*50); // cutoff freq ~ 50 Hz
-    m_current_twist = alpha_filter_twist*m_current_twist + (1-alpha_filter_twist)* Base::m_ik_solver->getEndEffectorVel();
-    ctrl::Vector6D error_derivative = m_target_twist - m_current_twist;
-    // Compute error derivative (target_twist - current_twist)
+    ctrl::Vector6D error, error_derivative;
+    computeMotionError(error, error_derivative);
 
     // Turn Cartesian error into joint motion
     Base::computeJointControlCmds(error, error_derivative, internal_period);
@@ -222,9 +170,21 @@ controller_interface::return_type CartesianMotionController::update()
   return controller_interface::return_type::OK;
 }
 
-ctrl::Vector6D CartesianMotionController::
-computeMotionError()
+
+ctrl::Vector6D
+CartesianMotionController::computeMotionError()
 {
+  ctrl::Vector6D error;
+  ctrl::Vector6D error_derivative;
+  computeMotionError(error, error_derivative);
+  return error;
+}
+
+void
+CartesianMotionController::computeMotionError(ctrl::Vector6D& error, ctrl::Vector6D& error_derivative)
+{
+  // Retrieve latest target pose and twist
+  updateTarget();
   // Compute motion error wrt robot_base_link
   m_current_frame = Base::m_ik_solver->getEndEffectorPose();
 
@@ -254,7 +214,6 @@ computeMotionError()
   error_kdl.p = error_kdl.p * distance;
 
   // Reassign values
-  ctrl::Vector6D error;
   error(0) = error_kdl.p.x();
   error(1) = error_kdl.p.y();
   error(2) = error_kdl.p.z();
@@ -262,9 +221,73 @@ computeMotionError()
   error(4) = rot_axis(1);
   error(5) = rot_axis(2);
 
-  return error;
+
+  // Compute error derivative (target_twist - current_twist)
+  double alpha_filter_twist = 1 - exp(-0.001 * 2*M_PI*50); // cutoff freq ~ 50 Hz
+  m_current_twist = alpha_filter_twist*m_current_twist + (1-alpha_filter_twist)* Base::m_ik_solver->getEndEffectorVel();
+  error_derivative = m_target_twist - m_current_twist;
+
+  return;
 }
 
+bool CartesianMotionController::updateTarget() 
+{
+  auto target_pose_msg = m_realtime_target_frame_ptr.readFromRT();
+  bool all_ok = true;
+  if (!target_pose_msg || !(*target_pose_msg)) // Else, the buffer is empty
+  {
+    auto& clock = *node_->get_clock();
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), clock, 3000, "No target pose received!");  
+    all_ok = false;
+  }
+  else
+  {
+     targetFrameCallback(*target_pose_msg);
+  }
+  // Read target twist
+  auto target_twist_msg = m_realtime_target_twist_ptr.readFromRT();
+  if (!target_twist_msg || !(*target_twist_msg)) // Else, the buffer is empty
+  {
+    auto& clock = *node_->get_clock();
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), clock, 3000, "No target twist received!");  
+    all_ok = false;
+  }
+  else
+  {
+     targetTwistCallback(*target_twist_msg);
+  }
+
+
+  //--------------------------------------------------------
+  // DEBUG ONLY!
+  geometry_msgs::msg::PoseStamped current_pose;
+  auto current_time = get_node()->now();
+  current_pose.header.stamp    = current_time;
+  current_pose.header.frame_id = m_robot_base_link;
+  current_pose.pose.position.x = m_current_frame.p.x();
+  current_pose.pose.position.y = m_current_frame.p.y();
+  current_pose.pose.position.z = m_current_frame.p.z();
+  m_current_frame.M.GetQuaternion(current_pose.pose.orientation.x,
+                      current_pose.pose.orientation.y,
+                      current_pose.pose.orientation.z,
+                      current_pose.pose.orientation.w);
+  m_current_pose_publisher->publish(current_pose);
+
+  geometry_msgs::msg::PoseStamped target_pose;
+  target_pose.header.stamp    = current_time;
+  target_pose.header.frame_id = m_robot_base_link;
+  target_pose.pose.position.x = m_target_frame.p.x();
+  target_pose.pose.position.y = m_target_frame.p.y();
+  target_pose.pose.position.z = m_target_frame.p.z();
+  m_target_frame.M.GetQuaternion(target_pose.pose.orientation.x,
+                      target_pose.pose.orientation.y,
+                      target_pose.pose.orientation.z,
+                      target_pose.pose.orientation.w);
+  m_target_pose_publisher->publish(target_pose);
+  //--------------------------------------------------------
+
+  return all_ok;
+}
 void CartesianMotionController::targetFrameCallback(std::shared_ptr<geometry_msgs::msg::PoseStamped> target_msg)
 { 
   if (target_msg->header.frame_id != Base::m_robot_base_link)

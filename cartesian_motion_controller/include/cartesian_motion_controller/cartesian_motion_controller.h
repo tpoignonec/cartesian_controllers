@@ -122,14 +122,17 @@ class CartesianMotionController : public virtual cartesian_controller_base::Cart
      * @return The error as a 6-dim vector (linear, angular) w.r.t to the robot base link
      */
     ctrl::Vector6D        computeMotionError();
+    ///@overload
+    void computeMotionError (ctrl::Vector6D& error, ctrl::Vector6D& error_derivative);
+    
     KDL::Frame      m_target_frame;
     KDL::Frame      m_current_frame;
     ctrl::Vector6D      m_target_twist;
     ctrl::Vector6D      m_current_twist;
 
     void targetFrameCallback(std::shared_ptr<geometry_msgs::msg::PoseStamped> target_msg);
-
     void targetTwistCallback(std::shared_ptr<geometry_msgs::msg::TwistStamped> target_twist_msg);
+    bool updateTarget();
 
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr m_target_frame_subscr;
     realtime_tools::RealtimeBuffer<std::shared_ptr<geometry_msgs::msg::PoseStamped>> m_realtime_target_frame_ptr; ///< Real-time buffer for the target pose
