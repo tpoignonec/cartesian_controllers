@@ -66,6 +66,11 @@
 #include <kdl/chainfksolverpos_recursive.hpp>
 #include <kdl/chainfksolvervel_recursive.hpp>
 
+//Debug
+
+#include "realtime_tools/realtime_publisher.h"
+#include "sensor_msgs/msg/joint_state.hpp"
+
 namespace cartesian_controller_base{
 
 /*! \brief Base class to compute manipulator joint motion from Cartesian force inputs.
@@ -200,6 +205,12 @@ class IKSolver
     std::shared_ptr<KDL::ChainFkSolverVel_recursive>  m_fk_vel_solver;
     KDL::Frame      m_end_effector_pose;
     ctrl::Vector6D  m_end_effector_vel;
+
+    // DEBUG
+    std::shared_ptr<rclcpp::Node> m_handle; ///< handle for dynamic parameter interaction    
+    std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::JointState>> joint_state_publisher_;
+    std::shared_ptr<realtime_tools::RealtimePublisher<sensor_msgs::msg::JointState>>
+      realtime_joint_state_publisher_;
 };
 
 

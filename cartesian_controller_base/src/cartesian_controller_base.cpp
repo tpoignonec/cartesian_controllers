@@ -357,11 +357,26 @@ void CartesianControllerBase::writeJointControlCmds()
   }
 }
 
+
 void CartesianControllerBase::computeJointControlCmds(const ctrl::Vector6D& error, const rclcpp::Duration& period)
 {
   // PD controlled system input
   m_error_scale = get_node()->get_parameter("solver.error_scale").as_double();
   m_cartesian_input = m_error_scale * m_spatial_controller(error,period);
+
+  // Simulate one step forward
+  m_simulated_joint_motion = m_ik_solver->getJointControlCmds(
+      period,
+      m_cartesian_input);
+
+  m_ik_solver->updateKinematics();
+}
+
+void CartesianControllerBase::computeJointControlCmds(const ctrl::Vector6D& error, const ctrl::Vector6D& error_derivative, const rclcpp::Duration& period)
+{
+  // PD controlled system input
+  m_error_scale = get_node()->get_parameter("solver.error_scale").as_double();
+  m_cartesian_input = m_error_scale * m_spatial_controller(error, error_derivative, period);
 
   // Simulate one step forward
   m_simulated_joint_motion = m_ik_solver->getJointControlCmds(

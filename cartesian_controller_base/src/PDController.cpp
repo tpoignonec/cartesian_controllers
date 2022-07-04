@@ -39,12 +39,13 @@
 //-----------------------------------------------------------------------------
 
 #include <cartesian_controller_base/PDController.h>
+#include <cmath> 
 
 namespace cartesian_controller_base
 {
 
 PDController::PDController()
-  : m_last_p_error(0.0)
+  : m_last_p_error(0.0), m_last_p_error_derivative(0.0)
 {
 }
 
@@ -77,17 +78,23 @@ void PDController::init(const std::string& params, std::shared_ptr<rclcpp::Node>
 
 double PDController::operator()(const double& error, const rclcpp::Duration& period)
 {
-  if (period == rclcpp::Duration(0.0))
+  if (period == rclcpp::Duration::from_nanoseconds(0.0))
   {
     return 0.0;
   }
+  double error_derivative = (error - m_last_p_error)/period.seconds();
+  return PDController::operator()(error, error_derivative, period);
+}
 
+double PDController::operator()(const double& error, const double& error_derivative, const rclcpp::Duration& period) {
   // Get latest gains
   m_handle->get_parameter(m_params + ".p", m_p);
   m_handle->get_parameter(m_params + ".d", m_d);
-  double result = m_p * error + m_d * (error - m_last_p_error) / period.seconds();
 
+  // Copute PD output
+  double result = m_p * error + m_d * error_derivative;
   m_last_p_error = error;
+  m_last_p_error_derivative = error_derivative;
   return result;
 }
 

@@ -100,6 +100,13 @@ namespace cartesian_controller_base{
       {
         return false;
       }
+
+      auto & joint_state_msg = realtime_joint_state_publisher_->msg_;
+      joint_state_msg.name = {"1", "2", "3", "4", "5", "6", "7"};
+      const auto kUninitializedValue = std::numeric_limits<double>::quiet_NaN();
+      joint_state_msg.position.resize(m_number_joints, kUninitializedValue);
+      joint_state_msg.velocity.resize(m_number_joints, kUninitializedValue);
+      joint_state_msg.effort.resize(m_number_joints, kUninitializedValue);
     }
     return true;
   }
@@ -119,10 +126,24 @@ namespace cartesian_controller_base{
         m_last_positions(i)    = m_current_positions(i);
       }
     }
+    if (realtime_joint_state_publisher_ && realtime_joint_state_publisher_->trylock())
+    {
+      auto & joint_state_msg = realtime_joint_state_publisher_->msg_;
+
+      joint_state_msg.header.stamp = m_handle->get_clock()->now();
+
+      // update joint state message and dynamic joint state message
+      for (size_t i = 0; i < m_number_joints; ++i)
+      {
+        joint_state_msg.position[i] = m_current_positions(i);
+        joint_state_msg.velocity[i] = m_current_velocities(i);
+      }
+      realtime_joint_state_publisher_->unlockAndPublish();
+    }
   }
 
 
-  bool IKSolver::init(std::shared_ptr<rclcpp::Node> /*nh*/,
+  bool IKSolver::init(std::shared_ptr<rclcpp::Node> node_handle,
                       const KDL::Chain& chain,
                       const KDL::JntArray& upper_pos_limits,
                       const KDL::JntArray& lower_pos_limits)
@@ -141,6 +162,16 @@ namespace cartesian_controller_base{
     // Forward kinematics
     m_fk_pos_solver.reset(new KDL::ChainFkSolverPos_recursive(m_chain));
     m_fk_vel_solver.reset(new KDL::ChainFkSolverVel_recursive(m_chain));
+
+
+  // DEBUG
+    m_handle = node_handle;
+    joint_state_publisher_ = node_handle->create_publisher<sensor_msgs::msg::JointState>(
+      "/follower_controller/joint_states", rclcpp::SystemDefaultsQoS());
+    realtime_joint_state_publisher_ =
+      std::make_shared<realtime_tools::RealtimePublisher<sensor_msgs::msg::JointState>>(
+        joint_state_publisher_);
+        
 
     return true;
   }
