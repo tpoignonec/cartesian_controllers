@@ -329,6 +329,7 @@ void CartesianMotionController::targetTwistCallback(std::shared_ptr<geometry_msg
     return;
   }
   ctrl::Vector6D raw_target_twist;
+  raw_target_twist[0] = target_twist_msg->twist.linear.x;
   raw_target_twist[1] = target_twist_msg->twist.linear.y;
   raw_target_twist[2] = target_twist_msg->twist.linear.z;
   raw_target_twist[3] = target_twist_msg->twist.angular.x;

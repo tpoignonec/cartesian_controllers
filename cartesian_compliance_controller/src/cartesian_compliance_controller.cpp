@@ -41,6 +41,7 @@
 #include "cartesian_controller_base/Utility.h"
 #include <cartesian_compliance_controller/cartesian_compliance_controller.h>
 #include "controller_interface/controller_interface.hpp"
+#include <cmath>
 
 namespace cartesian_compliance_controller
 {
@@ -73,6 +74,21 @@ rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn Cartes
   auto_declare<double>("stiffness.rot_x", default_rot_stiff);
   auto_declare<double>("stiffness.rot_y", default_rot_stiff);
   auto_declare<double>("stiffness.rot_z", default_rot_stiff);
+
+  double default_damping_coeff = 0.9;
+  auto_declare<double>("damping.trans_x", 2*sqrt(default_damping_coeff*get_node()->get_parameter("stiffness.trans_x").as_double()));
+  auto_declare<double>("damping.trans_y", 2*sqrt(default_damping_coeff*get_node()->get_parameter("stiffness.trans_y").as_double()));
+  auto_declare<double>("damping.trans_z", 2*sqrt(default_damping_coeff*get_node()->get_parameter("stiffness.trans_z").as_double()));
+  auto_declare<double>("damping.rot_x", 0.0);
+  auto_declare<double>("damping.rot_y", 0.0);
+  auto_declare<double>("damping.rot_z", 0.0);
+
+  auto_declare<bool>("activate_compliance.trans_x", false);
+  auto_declare<bool>("activate_compliance.trans_y", false);
+  auto_declare<bool>("activate_compliance.trans_z", false);
+  auto_declare<bool>("activate_compliance.rot_x", false);
+  auto_declare<bool>("activate_compliance.rot_y", false);
+  auto_declare<bool>("activate_compliance.rot_z", false);
 
   return TYPE::SUCCESS;
 }
@@ -164,25 +180,48 @@ controller_interface::return_type CartesianComplianceController::update()
 
 ctrl::Vector6D CartesianComplianceController::computeComplianceError()
 {
-  ctrl::Vector6D tmp;
-  tmp[0] = get_node()->get_parameter("stiffness.trans_x").as_double();
-  tmp[1] = get_node()->get_parameter("stiffness.trans_y").as_double();
-  tmp[2] = get_node()->get_parameter("stiffness.trans_z").as_double();
-  tmp[3] = get_node()->get_parameter("stiffness.rot_x").as_double();
-  tmp[4] = get_node()->get_parameter("stiffness.rot_y").as_double();
-  tmp[5] = get_node()->get_parameter("stiffness.rot_z").as_double();
-  m_stiffness = tmp.asDiagonal();
-  
-  Eigen::Matrix<double, 6, 6> compliant_directions = Eigen::Matrix<double, 6, 6>::Zero();
-  compliant_directions(2,2) = 1; // only along Z
+  ctrl::Vector6D tmp_stiff;
+  tmp_stiff[0] = get_node()->get_parameter("stiffness.trans_x").as_double();
+  tmp_stiff[1] = get_node()->get_parameter("stiffness.trans_y").as_double();
+  tmp_stiff[2] = get_node()->get_parameter("stiffness.trans_z").as_double();
+  tmp_stiff[3] = get_node()->get_parameter("stiffness.rot_x").as_double();
+  tmp_stiff[4] = get_node()->get_parameter("stiffness.rot_y").as_double();
+  tmp_stiff[5] = get_node()->get_parameter("stiffness.rot_z").as_double();
+  m_stiffness = tmp_stiff.asDiagonal();
+  ctrl::Vector6D tmp_damp;
+  tmp_damp[0] = get_node()->get_parameter("damping.trans_x").as_double();
+  tmp_damp[1] = get_node()->get_parameter("damping.trans_y").as_double();
+  tmp_damp[2] = get_node()->get_parameter("damping.trans_z").as_double();
+  tmp_damp[3] = get_node()->get_parameter("damping.rot_x").as_double();
+  tmp_damp[4] = get_node()->get_parameter("damping.rot_y").as_double();
+  tmp_damp[5] = get_node()->get_parameter("damping.rot_z").as_double();
+  m_damping = tmp_damp.asDiagonal();
+
+  ctrl::Vector6D tmp_activate_compliance;
+  tmp_activate_compliance[0] = static_cast<int>(get_node()->get_parameter("activate_compliance.trans_x").as_bool());
+  tmp_activate_compliance[1] = static_cast<int>(get_node()->get_parameter("activate_compliance.trans_y").as_bool());
+  tmp_activate_compliance[2] = static_cast<int>(get_node()->get_parameter("activate_compliance.trans_z").as_bool());
+  tmp_activate_compliance[3] = static_cast<int>(get_node()->get_parameter("activate_compliance.rot_x").as_bool());
+  tmp_activate_compliance[4] = static_cast<int>(get_node()->get_parameter("activate_compliance.rot_y").as_bool());
+  tmp_activate_compliance[5] = static_cast<int>(get_node()->get_parameter("activate_compliance.rot_z").as_bool());
+  auto compliant_directions = tmp_activate_compliance.asDiagonal();
+
+  ctrl::Vector6D motion_error, motion_error_derivative;
+  MotionBase::computeMotionError(motion_error, motion_error_derivative);
 
   ctrl::Vector6D net_force =
-
     // Spring force in base orientation
-    Base::displayInBaseLink(m_stiffness,m_compliance_ref_link) * MotionBase::computeMotionError()
+    Base::displayInBaseLink(m_stiffness, m_compliance_ref_link) * motion_error
+    // Damping 
+      + Base::displayInBaseLink(m_damping, m_compliance_ref_link) * motion_error_derivative 
     // Sensor and target force in base orientation
       + compliant_directions * ForceBase::computeForceError();
 
+  RCLCPP_WARN_THROTTLE(this->get_node()->get_logger(),
+      *node_->get_clock(), 100,
+      "Error = [%f, %f, %f]. Error der. = [%f, %f, %f]",
+      motion_error[0], motion_error[1], motion_error[2],
+      motion_error_derivative[0], motion_error_derivative[1], motion_error_derivative[2]);
   return net_force;
 }
 
