@@ -216,12 +216,6 @@ ctrl::Vector6D CartesianComplianceController::computeComplianceError()
       + Base::displayInBaseLink(m_damping, m_compliance_ref_link) * motion_error_derivative 
     // Sensor and target force in base orientation
       + compliant_directions * ForceBase::computeForceError();
-
-  RCLCPP_WARN_THROTTLE(this->get_node()->get_logger(),
-      *node_->get_clock(), 100,
-      "Error = [%f, %f, %f]. Error der. = [%f, %f, %f]",
-      motion_error[0], motion_error[1], motion_error[2],
-      motion_error_derivative[0], motion_error_derivative[1], motion_error_derivative[2]);
   return net_force;
 }
 
