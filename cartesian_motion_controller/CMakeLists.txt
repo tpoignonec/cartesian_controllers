@@ -10,12 +10,14 @@ add_definitions(-DEIGEN_MPL2_ONLY)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(cartesian_controller_base REQUIRED)
+find_package(realtime_tools REQUIRED)
 
 # Convenience variable for dependencies
 set(THIS_PACKAGE_INCLUDE_DEPENDS
         rclcpp
         cartesian_controller_base
         Eigen3
+        realtime_tools
 )
 
 ament_export_dependencies(

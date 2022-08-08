@@ -116,6 +116,18 @@ class CartesianControllerBase : public controller_interface::ControllerInterface
     void computeJointControlCmds(const ctrl::Vector6D& error, const rclcpp::Duration& period);
 
     /**
+     * @brief Compute one control step using forward dynamics simulation
+     *
+     * Check \ref ForwardDynamicsSolver for details.
+     *
+     * @param error The error to minimize
+     * @param error The derivative of the error to minimize
+     * @param period The period for this control cycle
+     * @overload
+     */
+    void computeJointControlCmds(const ctrl::Vector6D& error, const ctrl::Vector6D& error_derivative, const rclcpp::Duration& period);
+
+    /**
      * @brief Display the given vector in the given robot base link
      *
      * @param vector The quantity to transform

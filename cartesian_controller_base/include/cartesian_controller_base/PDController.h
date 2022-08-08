@@ -66,6 +66,9 @@ class PDController
 
     double operator()(const double& error, const rclcpp::Duration& period);
 
+    /// @overload
+    double operator()(const double& error, const double& error_derivative, const rclcpp::Duration& period);
+
   private:
     std::shared_ptr<rclcpp::Node> m_handle; ///< handle for dynamic parameter interaction
     std::string m_params; ///< namespace for parameter access
@@ -74,9 +77,8 @@ class PDController
     double m_p; ///< proportional gain
     double m_d; ///< derivative gain
     double m_last_p_error;
-
+    double m_last_p_error_derivative = 0;
 };
 
 }
-
 #endif

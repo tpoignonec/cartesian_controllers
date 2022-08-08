@@ -109,7 +109,7 @@ class CartesianComplianceController
      */
     ctrl::Vector6D        computeComplianceError();
 
-    ctrl::Matrix6D        m_stiffness;
+    ctrl::Matrix6D        m_stiffness, m_damping;
     std::string           m_compliance_ref_link;
 
 };

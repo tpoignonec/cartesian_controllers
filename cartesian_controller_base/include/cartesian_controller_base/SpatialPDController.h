@@ -70,6 +70,18 @@ class SpatialPDController
      */
     ctrl::Vector6D operator()(const ctrl::Vector6D& error, const rclcpp::Duration& period);
 
+    /**
+     * @brief Call operator for one control cycle
+     *
+     * @param error The control error to reduce. Target - current.
+     * @param error_derivative The derivative of the control error to reduce. Target_twist - current_twist.
+     * @param period The period for this control step.
+     *
+     * @overload
+     * @return The controlled 6-dim vector (translational, rotational).
+     */
+    ctrl::Vector6D operator()(const ctrl::Vector6D& error, const ctrl::Vector6D& error_derivative, const rclcpp::Duration& period);
+
   private:
     ctrl::Vector6D m_cmd;
     std::vector<PDController> m_pd_controllers;

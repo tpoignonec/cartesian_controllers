@@ -44,6 +44,9 @@
 #include <cartesian_controller_base/ROS2VersionConfig.h>
 #include <cartesian_controller_base/cartesian_controller_base.h>
 #include <controller_interface/controller_interface.hpp>
+#include "realtime_tools/realtime_buffer.h"
+#include "rclcpp/subscription.hpp"
+#include "geometry_msgs/msg/twist_stamped.hpp"
 
 namespace cartesian_motion_controller
 {
@@ -112,12 +115,27 @@ class CartesianMotionController : public virtual cartesian_controller_base::Cart
      * @return The error as a 6-dim vector (linear, angular) w.r.t to the robot base link
      */
     ctrl::Vector6D        computeMotionError();
+    ///@overload
+    void computeMotionError (ctrl::Vector6D& error, ctrl::Vector6D& error_derivative);
+    
     KDL::Frame      m_target_frame;
     KDL::Frame      m_current_frame;
+    ctrl::Vector6D      m_target_twist;
+    ctrl::Vector6D      m_current_twist;
 
-    void targetFrameCallback(const geometry_msgs::msg::PoseStamped::SharedPtr target);
+    void targetFrameCallback(std::shared_ptr<geometry_msgs::msg::PoseStamped> target_msg);
+    void targetTwistCallback(std::shared_ptr<geometry_msgs::msg::TwistStamped> target_twist_msg);
+    bool updateTarget();
 
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr m_target_frame_subscr;
+    realtime_tools::RealtimeBuffer<std::shared_ptr<geometry_msgs::msg::PoseStamped>> m_realtime_target_frame_ptr; ///< Real-time buffer for the target pose
+
+    rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr m_target_twist_subscr;
+    realtime_tools::RealtimeBuffer<std::shared_ptr<geometry_msgs::msg::TwistStamped>> m_realtime_target_twist_ptr; ///< Real-time buffer for the target twist
+
+    // DEBUG
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr  m_current_pose_publisher;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr  m_target_pose_publisher;
 };
 
 }
